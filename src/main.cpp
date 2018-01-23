@@ -227,6 +227,7 @@ void initWiFi()
     WiFi.mode(WIFI_STA);
     WiFi.persistent(false);
     WiFi.config(ip, dns, gateway, subnet);
+    WiFi.setAutoReconnect(true);
     WiFi.begin(WIFI_SSID, WIFI_PASS); //Connect to the WiFi network
     Serial.println("Connecting");
     while (WiFi.status() != WL_CONNECTED)
@@ -276,9 +277,6 @@ void initOTA()
 
 void initMQTT()
 {
-    client.setServer(mqtt_server, mqtt_port);
-    client.setCallback(callback);
-
     while (!client.connected())
     {
         Serial.println("Connecting to MQTT...");
@@ -286,6 +284,8 @@ void initMQTT()
         if (client.connect("DeskClient", mqtt_user, mqtt_pass))
         {
             Serial.println("connected");
+
+            client.subscribe("deskcontrol/setheight");
         }
         else
         {
@@ -294,8 +294,6 @@ void initMQTT()
             delay(2000);
         }
     }
-
-    client.subscribe("deskcontrol/setheight");
 }
 
 void setup()
@@ -314,6 +312,8 @@ void setup()
 
     initOTA();
 
+    client.setServer(mqtt_server, mqtt_port);
+    client.setCallback(callback);
     initMQTT();
 
     gLastTimeUs = micros();
@@ -324,6 +324,10 @@ void setup()
 void loop()
 {
     ArduinoOTA.handle();
+    if (!client.connected())
+    {
+        initMQTT();
+    }
     client.loop();
 
     // Read the current height signal bit and interpret it
