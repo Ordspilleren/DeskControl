@@ -5,9 +5,13 @@
 #include <CREDENTIALS.h>
 
 // PINS FOR UP AND DOWN SHOULD NOT BE ON D3 AND D4 BECAUSE OF PULL-UP RESISTORS. CHANGE THIS!!!!
-#define INTERRUPT_SIGNAL_IN D4
+#define INTERRUPT_SIGNAL_IN D6
 #define PIN_UP_SWITCH_OUT D2
 #define PIN_DOWN_SWITCH_OUT D1
+
+// From hand switch to Arduino
+#define PIN_UP_SWITCH_IN D4
+#define PIN_DOWN_SWITCH_IN D3
 
 // Constants
 //#define MAX_ULONG 4294967295 // Maximum value an unsigned long can have
@@ -26,6 +30,8 @@ byte gCurBit = 0;
 byte gCurHeight = 0;
 byte gNumMatchingBits = 0;
 byte gTargetHeight = 0;
+bool gIsSwitchOverride = false;
+bool gIsAutoMode = true;
 volatile unsigned long gCurTimeUs = 0;
 volatile unsigned long gLastTimeUs = 0;
 
@@ -128,26 +134,38 @@ void stopTable()
 
 void controlTableMovement()
 {
-    if (currentDirection == UP && (gCurHeight + 1) >= gTargetHeight)
+    if (gIsSwitchOverride)
     {
-        stopTable();
+        return;
     }
-    if (currentDirection == DOWN && (gCurHeight - 1) <= gTargetHeight)
+
+    if (gIsAutoMode)
     {
-        stopTable();
+        if (currentDirection == UP && (gCurHeight + 1) >= gTargetHeight)
+        {
+            stopTable();
+        }
+        if (currentDirection == DOWN && (gCurHeight - 1) <= gTargetHeight)
+        {
+            stopTable();
+        }
     }
 }
 
 void setHeight()
 {
-    if (gCurHeight < gTargetHeight && gTargetHeight < 113)
+    if (!gIsSwitchOverride)
     {
-        moveTableUp();
-    }
+        gIsAutoMode = true;
+        if (gCurHeight < gTargetHeight && gTargetHeight < 113)
+        {
+            moveTableUp();
+        }
 
-    else if (gCurHeight > gTargetHeight)
-    {
-        moveTableDown();
+        else if (gCurHeight > gTargetHeight)
+        {
+            moveTableDown();
+        }
     }
 }
 
@@ -165,6 +183,37 @@ void callback(char *topic, byte *payload, unsigned int length)
     {
         gTargetHeight = value.toInt();
         setHeight();
+    }
+}
+
+// Read input from the real switches (can override PC)
+void handleSwitchInputs()
+{
+    bool upSwitchPressed = digitalRead(PIN_UP_SWITCH_IN);
+    bool downSwitchPressed = digitalRead(PIN_DOWN_SWITCH_IN);
+
+    if (gIsSwitchOverride)
+    {
+        if (upSwitchPressed == HIGH && downSwitchPressed == HIGH)
+        {
+            stopTable();
+            gIsSwitchOverride = false;
+        }
+    }
+    else
+    {
+        if (upSwitchPressed == LOW)
+        {
+            moveTableUp();
+            gIsSwitchOverride = true;
+            gIsAutoMode = false;
+        }
+        else if (downSwitchPressed == LOW)
+        {
+            moveTableDown();
+            gIsSwitchOverride = true;
+            gIsAutoMode = false;
+        }
     }
 }
 
@@ -255,6 +304,8 @@ void setup()
     pinMode(PIN_UP_SWITCH_OUT, OUTPUT);
     pinMode(PIN_DOWN_SWITCH_OUT, OUTPUT);
     pinMode(INTERRUPT_SIGNAL_IN, INPUT);
+    pinMode(PIN_UP_SWITCH_IN, INPUT_PULLUP);
+    pinMode(PIN_DOWN_SWITCH_IN, INPUT_PULLUP);
     digitalWrite(PIN_UP_SWITCH_OUT, LOW);
     digitalWrite(PIN_DOWN_SWITCH_OUT, LOW);
     attachInterrupt(digitalPinToInterrupt(INTERRUPT_SIGNAL_IN), onEdgeEvent, CHANGE);
@@ -282,4 +333,18 @@ void loop()
     }
 
     controlTableMovement();
+
+    handleSwitchInputs();
+
+    /*
+    if (digitalRead(PIN_UP_SWITCH_IN) == LOW)
+    {
+        Serial.println("UP PRESSED");
+    }
+
+    if (digitalRead(PIN_DOWN_SWITCH_IN) == LOW)
+    {
+        Serial.println("DOWN PRESSED");
+    }
+    */
 }
