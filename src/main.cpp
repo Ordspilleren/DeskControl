@@ -20,6 +20,10 @@
 #define MATCH_ARRAY_SIZE 23 // Size of the array that contains the bit pattern to compare to
 #define BIT_INDEX_HEIGHT 23 // Index at which the height value starts
 
+const int maxHeight = 113;
+const int upOffset = 1;
+const int downOffset = 2;
+
 // Array that stores received bits
 byte gBitArray[ARRAY_SIZE];
 
@@ -57,7 +61,7 @@ bool checkTime()
     return false;
 }
 
-void onEdgeEvent()
+void ICACHE_RAM_ATTR onEdgeEvent()
 {
     // Synchronize wait time with edge
     gLastTimeUs = micros() - (CYCLE_TIME_US / 2);
@@ -141,11 +145,11 @@ void controlTableMovement()
 
     if (gIsAutoMode)
     {
-        if (currentDirection == UP && (gCurHeight + 1) >= gTargetHeight)
+        if (currentDirection == UP && (gCurHeight + upOffset) >= gTargetHeight)
         {
             stopTable();
         }
-        if (currentDirection == DOWN && (gCurHeight - 1) <= gTargetHeight)
+        if (currentDirection == DOWN && (gCurHeight - downOffset) <= gTargetHeight)
         {
             stopTable();
         }
@@ -157,7 +161,7 @@ void setHeight()
     if (!gIsSwitchOverride)
     {
         gIsAutoMode = true;
-        if (gCurHeight < gTargetHeight && gTargetHeight < 113)
+        if (gCurHeight < gTargetHeight && gTargetHeight < maxHeight)
         {
             moveTableUp();
         }
@@ -174,7 +178,7 @@ void callback(char *topic, byte *payload, unsigned int length)
     String receivedtopic = topic;
 
     String value = "";
-    for (int i = 0; i < length; i++)
+    for (unsigned int i = 0; i < length; i++)
     {
         value += (char)payload[i];
     }
@@ -219,26 +223,11 @@ void handleSwitchInputs()
 
 void initWiFi()
 {
-    IPAddress ip(10, 3, 3, 60);
-    IPAddress gateway(10, 3, 3, 1);
-    IPAddress subnet(255, 255, 255, 0);
-    IPAddress dns(10, 3, 3, 1);
-
     WiFi.mode(WIFI_STA);
     WiFi.persistent(false);
     WiFi.config(ip, dns, gateway, subnet);
     WiFi.setAutoReconnect(true);
     WiFi.begin(WIFI_SSID, WIFI_PASS); //Connect to the WiFi network
-    Serial.println("Connecting");
-    while (WiFi.status() != WL_CONNECTED)
-    { //Wait for connection
-
-        delay(1000);
-        Serial.print(".");
-    }
-    Serial.println("");
-    Serial.println("IP address: ");
-    Serial.print(WiFi.localIP()); //Print the local IP
 }
 
 void initOTA()
@@ -275,24 +264,51 @@ void initOTA()
     ArduinoOTA.begin();
 }
 
+long lastReconnectAttempt = 0;
+boolean mqttReconnect()
+{
+    if (client.connect("DeskClient"))
+    {
+        client.subscribe("deskcontrol/setheight");
+    }
+    return client.connected();
+}
+
 void initMQTT()
 {
-    while (!client.connected())
+    if (!client.connected())
     {
-        Serial.println("Connecting to MQTT...");
-
-        if (client.connect("DeskClient", mqtt_user, mqtt_pass))
+        long now = millis();
+        if (now - lastReconnectAttempt > 5000)
         {
-            Serial.println("connected");
+            lastReconnectAttempt = now;
+            // Attempt to reconnect
+            if (mqttReconnect())
+            {
+                lastReconnectAttempt = 0;
+            }
+        }
+    }
+    else
+    {
+        // Client connected
 
-            client.subscribe("deskcontrol/setheight");
-        }
-        else
-        {
-            Serial.print("failed with state ");
-            Serial.print(client.state());
-            delay(2000);
-        }
+        client.loop();
+    }
+}
+
+long lastPublish = 0;
+byte lastHeight = 0;
+void publishHeight()
+{
+    long now = millis();
+    if (lastHeight != gCurHeight && now - lastPublish > 5000)
+    {
+        lastPublish = now;
+        lastHeight = gCurHeight;
+        char heightBuffer[3];
+        sprintf(heightBuffer, "%d", gCurHeight);
+        client.publish("deskcontrol/currentheight", heightBuffer, true);
     }
 }
 
@@ -312,23 +328,17 @@ void setup()
 
     initOTA();
 
-    client.setServer(mqtt_server, mqtt_port);
+    client.setServer(mqtt_server, 1883);
     client.setCallback(callback);
-    initMQTT();
+    lastReconnectAttempt = 0;
 
     gLastTimeUs = micros();
 }
 
-//unsigned long previousMillis = 0;
-
 void loop()
 {
     ArduinoOTA.handle();
-    if (!client.connected())
-    {
-        initMQTT();
-    }
-    client.loop();
+    initMQTT();
 
     // Read the current height signal bit and interpret it
     if (checkTime())
@@ -340,15 +350,5 @@ void loop()
 
     handleSwitchInputs();
 
-    /*
-    if (digitalRead(PIN_UP_SWITCH_IN) == LOW)
-    {
-        Serial.println("UP PRESSED");
-    }
-
-    if (digitalRead(PIN_DOWN_SWITCH_IN) == LOW)
-    {
-        Serial.println("DOWN PRESSED");
-    }
-    */
+    publishHeight();
 }

@@ -1,5 +1,9 @@
 .pioenvs
 .piolibdeps
-.vscode/c_cpp_properties.json
-.vscode/launch.json
+.pio
+.vscode/*
+!.vscode/settings.json
+!.vscode/tasks.json
+!.vscode/launch.json
+!.vscode/extensions.json
 src/CREDENTIALS.h
